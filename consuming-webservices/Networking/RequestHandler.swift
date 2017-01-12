@@ -45,12 +45,51 @@ struct HTTPRequestHandler: RequestHandler {
     var body: Any?
     
     func execute( callback: @escaping (Result<Any>) -> Void) {
-        var returnValue = 0
-        if let body = body as? [String: String] {
-            returnValue = body["args"] == "on" ? 1 : 0
+        guard
+            let url = URL(string: path) else {
+                callback(.failure(RequestError.invalidURL))
+                return
         }
         
-        let fakeData = ["return_value": returnValue, "result": 0]
-        callback(.success(fakeData))
+        var request = URLRequest(url: url)
+        request.httpMethod = method.rawValue
+        request.allHTTPHeaderFields = headers
+        do {
+            if let body = body {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body, options: .prettyPrinted)
+            }
+            
+            let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+                if let error = error {
+                    if let response = response as? HTTPURLResponse {
+                        callback(.failure(RequestError.httpResponse(response.statusCode)))
+                    }
+                    else {
+                        callback(.failure(error))
+                    }
+                    
+                    return
+                }
+                guard let data = data else {
+                    callback(.failure(RequestError.noData))
+                    return
+                }
+                
+                do {
+                    let json = try JSONSerialization.jsonObject(with: data, options: [])
+                    if let str = String(data: data, encoding: String.Encoding.utf8) {
+                        print("Received response: \(str)")
+                    }
+                    callback(.success(json))
+                }
+                catch {
+                    callback(.failure(error))
+                }
+            }
+            task.resume()
+        }
+        catch {
+            callback(.failure(error))
+        }
     }
 }
